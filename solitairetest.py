@@ -5,7 +5,7 @@ from kivy.graphics import Color, Rectangle
 from kivy.uix.label import Label
 from kivy.uix.boxlayout import BoxLayout
 
-# Card class representing each playing card
+
 class Card:
     def __init__(self, rank, suit):
         self.rank = rank
@@ -48,7 +48,7 @@ class Solitaire:
                     if j == i:  # Flip the top card of each pile
                         card.flip()
 
-# Custom widget for displaying a card
+
 class CardWidget(Widget):
     def __init__(self, card, **kwargs):
         super().__init__(**kwargs)
@@ -80,7 +80,7 @@ class CardWidget(Widget):
         # Ensure the label is centered within the widget
         self.label.center = self.center
 
-# Main game widget
+
 class SolitaireWidget(Widget):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -96,7 +96,7 @@ class SolitaireWidget(Widget):
                 card_widget.pos = (x, y)
                 self.add_widget(card_widget)
 
-# Kivy app class
+
 class SolitaireApp(App):
     def build(self):
         layout = BoxLayout(orientation='vertical')
