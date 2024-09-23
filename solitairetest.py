@@ -3,10 +3,8 @@ from kivy.app import App
 from kivy.uix.widget import Widget
 from kivy.graphics import Color, Rectangle, Line
 from kivy.uix.label import Label
-from kivy.uix.boxlayout import BoxLayout
-from kivy.core.window import Window
-from kivy.uix.button import Button
 from kivy.uix.popup import Popup
+from kivy.core.window import Window
 
 class Card:
     def __init__(self, rank, suit):
@@ -22,6 +20,17 @@ class Card:
 
     def is_black(self):
         return self.suit in ['C', 'S']
+
+    def rank_value(self):
+        if self.rank == 'A':
+            return 1
+        elif self.rank == 'J':
+            return 11
+        elif self.rank == 'Q':
+            return 12
+        elif self.rank == 'K':
+            return 13
+        return int(self.rank)
 
 class Deck:
     suits = ['H', 'D', 'C', 'S']
@@ -40,10 +49,13 @@ class Deck:
 class Solitaire:
     def __init__(self):
         self.deck = Deck()
+        self.waste_pile = []  # Waste pile
         self.tableau = [[] for _ in range(7)]
         self.foundation = [[] for _ in range(4)]
+        self.moves = []
+        self.score = 0
+        self.undo_limit = 3  # Limit the number of undo moves
         self.deal_initial_tableau()
-        self.selected_card_widget = None
 
     def deal_initial_tableau(self):
         for i in range(7):
@@ -57,6 +69,26 @@ class Solitaire:
     def check_win(self):
         return all(len(foundation) == 13 for foundation in self.foundation)
 
+    def undo_move(self):
+        if self.moves and len(self.moves) < self.undo_limit:
+            last_move = self.moves.pop()
+            source_index, target_index, cards = last_move
+            self.tableau[source_index].extend(cards)
+            for card in cards:
+                self.tableau[target_index].remove(card)
+            self.score -= 1
+
+    def can_move_to_foundation(self, card, foundation_pile):
+        if not foundation_pile:
+            return card.rank == 'A'  # Only Aces can start a foundation pile
+        top_card = foundation_pile[-1]
+        return card.suit == top_card.suit and card.rank_value() == top_card.rank_value() + 1
+
+    def move_to_foundation(self, card, foundation_index):
+        if self.can_move_to_foundation(card, self.foundation[foundation_index]):
+            self.foundation[foundation_index].append(card)
+            self.score += 10  # Add points for moving to foundation
+
 class CardWidget(Widget):
     def __init__(self, card, tableau_index, game, **kwargs):
         super().__init__(**kwargs)
@@ -67,74 +99,78 @@ class CardWidget(Widget):
         self.is_selected = False
         self.bind(pos=self.update_position, size=self.update_position)
         self.draw_card()
-        self.bind(on_touch_down=self.on_card_click)
 
-    def on_card_click(self, widget, touch):
+        self.dragging = False
+        self.original_pos = None
+
+    def on_touch_down(self, touch):
         if self.collide_point(touch.x, touch.y):
-            if self.is_selected:
-                self.is_selected = False
-                self.game.selected_card_widget = None
-                self.update_position()
+            if self.card.is_face_up:
+                self.dragging = True
+                self.original_pos = self.pos
+                self.is_selected = True  # Mark this card as selected
+                return True
             else:
-                if self.game.selected_card_widget:
-                    target_card_widget = self
-                    if self.can_place_on(target_card_widget.card):
-                        source_index = self.game.selected_card_widget.tableau_index
-                        self.game.tableau[source_index].remove(self.game.selected_card_widget.card)
-                        self.game.tableau[self.tableau_index].append(self.game.selected_card_widget.card)
-                        self.update_tableau()
-                        target_card_widget.update_tableau()
-
-                        self.game.selected_card_widget.is_selected = False
-                        self.game.selected_card_widget.update_position()
-                        self.game.selected_card_widget = None
-
-                        if self.game.check_win():
-                            self.show_win_popup()
-                else:
-                    self.is_selected = True
-                    self.game.selected_card_widget = self
-
-            self.update_position()
+                self.card.flip()  # Flip the card if it's face down
+                self.update_position()
             return True
         return False
 
+    def on_touch_move(self, touch):
+        if self.dragging:
+            self.pos = (touch.x - self.width / 2, touch.y - self.height / 2)
+            return True
+        return False
+
+    def on_touch_up(self, touch):
+        if self.dragging:
+            self.dragging = False
+            if self.is_valid_drop():
+                self.snap_to_new_position()
+            else:
+                # Return card to its original position if drop is invalid
+                self.pos = self.original_pos
+            self.is_selected = False  # Reset selection state
+            return True
+        return False
+
+    def is_valid_drop(self):
+        """Check if the card can be dropped on a valid tableau stack."""
+        for pile_index, pile in enumerate(self.game.tableau):
+            if pile and pile[-1].is_face_up:
+                top_card = pile[-1]
+                if self.can_place_on(top_card):
+                    self.tableau_index = pile_index
+                    return True
+            elif not pile and self.card.rank == 'K':  # Only kings can start an empty tableau
+                self.tableau_index = pile_index
+                return True
+        return False
+
     def can_place_on(self, target_card):
-        if not target_card.is_face_up:
-            return False
+        """Check if the current card can be placed on the target card."""
         return ((self.card.is_red() and target_card.is_black()) or
                 (self.card.is_black() and target_card.is_red())) and \
-            (self.rank_value(self.card.rank) == self.rank_value(target_card.rank) - 1)
+            (self.card.rank_value() == target_card.rank_value() - 1)
 
-    def rank_value(self, rank):
-        if rank == 'A':
-            return 1
-        elif rank == 'J':
-            return 11
-        elif rank == 'Q':
-            return 12
-        elif rank == 'K':
-            return 13
-        return int(rank)
-
-    def update_tableau(self):
-        if self.game.tableau[self.tableau_index]:
-            last_card = self.game.tableau[self.tableau_index][-1]
-            if not last_card.is_face_up:
-                last_card.flip()
-
-    def show_win_popup(self):
-        popup = Popup(title='Congratulations!', content=Label(text='You won the game!'), size_hint=(0.6, 0.6))
-        popup.open()
+    def snap_to_new_position(self):
+        """Snap the card to its new tableau stack."""
+        self.game.tableau[self.tableau_index].append(self.card)
+        self.game.score += 1
+        self.update_position()  # Update position after moving
+        if self.game.check_win():
+            self.show_win_popup()
 
     def update_position(self, *args):
-        if self.game.tableau[self.tableau_index]:
+        if self.tableau_index is not None and self.parent:
             y_offset = 0
             for card in self.game.tableau[self.tableau_index]:
                 if card == self.card:
-                    self.pos = (self.x, self.game.height - (y_offset * self.height * 0.25 + self.height))
+                    self.pos = (self.x, self.parent.height - (y_offset * self.height * 0.25 + self.height))
                     break
                 y_offset += 1
+        else:
+            self.pos = self.pos
 
         self.clear_widgets()
         self.canvas.clear()
@@ -142,10 +178,6 @@ class CardWidget(Widget):
 
     def draw_card(self):
         with self.canvas:
-            if self.is_selected:
-                Color(1, 1, 0, 1)  # Highlight color (yellow)
-                Rectangle(pos=(self.x - 5, self.y - 5), size=(self.width + 10, self.height + 10))
-
             if self.card.is_face_up:
                 Color(1, 1, 1, 1)
                 Rectangle(pos=self.pos, size=self.size)
@@ -154,25 +186,35 @@ class CardWidget(Widget):
 
                 rank_suit = f"{self.card.rank}{self.card.suit}"
                 label = Label(text=rank_suit, color=(1, 0, 0, 1) if self.card.is_red() else (0, 0, 0, 1))
-                label.pos = (self.x + 10, self.y + 10)
-                label.font_size = self.height * 0.2
+                label.pos = (self.x - 30, self.y + self.height - 65)  # Move label higher
+                label.font_size = self.height * 0.15
                 self.add_widget(label)
             else:
-                Color(0, 0, 1, 1)
+                Color(0, 0, 0.5, 1)  # Lighter blue for face-down cards
                 Rectangle(pos=self.pos, size=self.size)
                 Color(0, 0, 0, 1)
                 Line(rectangle=(self.x, self.y, self.width, self.height), width=2)
+
+    def show_win_popup(self):
+        popup = Popup(title='Congratulations!', content=Label(text='You won the game!'), size_hint=(0.6, 0.6))
+        popup.open()
 
 class SolitaireWidget(Widget):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.game = Solitaire()
-        self.drawn_card_widget = None
         self.bind(size=self.on_size)
+
+        # Initialize score label
+        self.score_label = Label(text=f'Score: {self.game.score}', size_hint=(None, None), size=(200, 50))
+        self.score_label.pos = (10, self.height - 50)
+        self.add_widget(self.score_label)
+
         self.setup_tableau()
 
     def on_size(self, *args):
         self.setup_tableau()
+        self.score_label.pos = (10, self.height - 50)
 
     def setup_tableau(self):
         self.clear_widgets()
@@ -183,52 +225,21 @@ class SolitaireWidget(Widget):
         card_height_offset = card_height * 0.25
 
         for i, pile in enumerate(self.game.tableau):
-            y_offset = 0
+            x = (i + 1) * pile_width - card_width / 2
             for j, card in enumerate(pile):
-                x = pile_width * (i + 1)
-                y = self.height - (y_offset * card_height_offset + card_height)
-
-                card_widget = CardWidget(card, i, self.game)
+                y = self.height - (j + 1) * card_height_offset - card_height
+                card_widget = CardWidget(card, i, self.game, size=(card_width, card_height))
                 card_widget.pos = (x, y)
-                card_widget.size = (card_width, card_height)
                 self.add_widget(card_widget)
 
-                y_offset += 1
-
-        if self.drawn_card_widget:
-            self.add_widget(self.drawn_card_widget)
-
-    def draw_card(self):
-        if self.game.deck.cards:
-            card = self.game.deck.deal_card()
-            card.flip()
-            card_widget = CardWidget(card, -1, self.game)  # -1 as it doesn't belong to a tableau
-            card_widget.size = (100, 150)  # Set size for drawn card
-            card_widget.pos = (self.width - 120, self.height - 200)  # Position for drawn card
-            self.drawn_card_widget = card_widget
-            self.add_widget(card_widget)
-
-    def reset_game(self):
-        self.game = Solitaire()
-        self.setup_tableau()
+        # Redraw the score label after adding all cards
+        self.add_widget(self.score_label)
+        self.score_label.text = f'Score: {self.game.score}'
 
 class SolitaireApp(App):
     def build(self):
-        layout = BoxLayout(orientation='vertical')
-        Window.size = (1080, 1980)
-        game_widget = SolitaireWidget()
+        Window.clearcolor = (0, 0.5, 0.2, 1)
+        return SolitaireWidget()
 
-        draw_button = Button(text='Draw Card', size_hint=(0.1, 0.1))
-        draw_button.bind(on_release=lambda instance: game_widget.draw_card())
-
-        reset_button = Button(text='Reset Game', size_hint=(0.1, 0.1))
-        reset_button.bind(on_release=game_widget.reset_game)
-
-        layout.add_widget(game_widget)
-        layout.add_widget(draw_button)
-        layout.add_widget(reset_button)
-
-        return layout
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     SolitaireApp().run()
