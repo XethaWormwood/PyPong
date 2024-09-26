@@ -1,226 +1,224 @@
 import random
 from kivy.app import App
 from kivy.uix.widget import Widget
-from kivy.uix.button import Button
-from kivy.uix.gridlayout import GridLayout
+from kivy.graphics import Color, Rectangle, Line
 from kivy.uix.label import Label
-from kivy.uix.image import Image
-from kivy.uix.relativelayout import RelativeLayout
-from kivy.properties import ObjectProperty
 from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.button import Button
+from kivy.core.window import Window
+from kivy.animation import Animation
 
-BREAK_STRING = "-------------------------------------------------------------------"
+# Set the window size
+Window.size = (800, 600)  # You can adjust this size as needed
 
 class Card:
-    card_to_name = {1: "A", 2: "2", 3: "3", 4: "4", 5: "5", 6: "6", 7: "7",
-                    8: "8", 9: "9", 10: "10", 11: "J", 12: "Q", 13: "K"}
-
-    def __init__(self, value, suit):
-        self.name = self.card_to_name[value]
+    def __init__(self, rank, suit):
+        self.rank = rank
         self.suit = suit
-        self.title = f"{self.name}{self.suit}"
-        self.value = value
         self.is_face_up = False
 
-    def isBelow(self, card):
-        return self.value == (card.value - 1)
+    def flip(self):
+        self.is_face_up = not self.is_face_up
 
-    def isOppositeSuit(self, card):
-        if self.suit in ["club", "spade"]:
-            return card.suit in ["heart", "diam"]
-        else:
-            return card.suit in ["spade", "club"]
-
-    def canAttach(self, card):
-        return card.isBelow(self) and card.isOppositeSuit(self)
-
-    def __str__(self):
-        return self.title
-
+    def is_red(self):
+        return self.suit in ['H', 'D']
+    
+    def is_black(self):
+        return self.suit in ['C', 'S']
 
 class Deck:
-    unshuffled_deck = [Card(card, suit) for card in range(1, 14) for suit in ["club", "diam", "heart", "spade"]]
+    suits = ['H', 'D', 'C', 'S']
+    ranks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K']
 
-    def __init__(self, num_decks=1):
-        self.deck = self.unshuffled_deck * num_decks
-        random.shuffle(self.deck)
-
-    def flip_card(self):
-        return self.deck.pop()
-
-    def deal_cards(self, num_cards):
-        return [self.deck.pop() for _ in range(0, num_cards)]
-
-
-class Tableau:
-    def __init__(self, card_list):
-        self.unflipped = {x: card_list[x] for x in range(7)}
-        self.flipped = {x: [self.unflipped[x].pop()] for x in range(7)}
-
-    def flip_card(self, col):
-        if len(self.unflipped[col]) > 0:
-            self.flipped[col].append(self.unflipped[col].pop())
-
-    def pile_length(self):
-        return max([len(self.flipped[x]) + len(self.unflipped[x]) for x in range(7)])
-
-    def addCards(self, cards, column):
-        column_cards = self.flipped[column]
-        if len(column_cards) == 0 and cards[0].value == 13:
-            column_cards.extend(cards)
-            return True
-        elif len(column_cards) > 0 and column_cards[-1].canAttach(cards[0]):
-            column_cards.extend(cards)
-            return True
-        else:
-            return False
-
-    def tableau_to_tableau(self, c1, c2):
-        c1_cards = self.flipped[c1]
-        for index in range(len(c1_cards)):
-            if self.addCards(c1_cards[index:], c2):
-                self.flipped[c1] = c1_cards[0:index]
-                if index == 0:
-                    self.flip_card(c1)
-                return True
-        return False
-
-    def tableau_to_foundation(self, foundation, column):
-        column_cards = self.flipped[column]
-        if len(column_cards) == 0:
-            return False
-        if foundation.addCard(column_cards[-1]):
-            column_cards.pop()
-            if len(column_cards) == 0:
-                self.flip_card(column)
-            return True
-        return False
-
-
-class Foundation:
     def __init__(self):
-        self.foundation_stacks = {"club": [], "heart": [], "spade": [], "diam": []}
+        self.cards = [Card(rank, suit) for suit in self.suits for rank in self.ranks]
+        self.shuffle()
 
-    def addCard(self, card):
-        stack = self.foundation_stacks[card.suit]
-        if (len(stack) == 0 and card.value == 1) or stack[-1].isBelow(card):
-            stack.append(card)
-            return True
-        return False
+    def shuffle(self):
+        random.shuffle(self.cards)
 
-    def gameWon(self):
-        for stack in self.foundation_stacks.values():
-            if len(stack) == 0 or stack[-1].value != 13:
-                return False
-        return True
+    def deal_card(self):
+        return self.cards.pop() if self.cards else None
 
+class Solitaire:
+    def __init__(self):
+        self.deck = Deck()
+        self.waste_pile = []  # Waste pile
+        self.tableau = [[] for _ in range(7)]  # 7 piles in the tableau
+        self.foundation = [[] for _ in range(4)]  # 4 foundation piles
+        self.deal_initial_tableau()
 
-class StockWaste:
-    def __init__(self, cards):
-        self.deck = cards
-        self.waste = []
+    def deal_initial_tableau(self):
+        for i in range(7):
+            for j in range(i, 7):
+                card = self.deck.deal_card()
+                if card:
+                    self.tableau[j].append(card)
+                    if j == i:
+                        card.flip()
 
-    def stock_to_waste(self):
-        if len(self.deck) == 0:
-            if len(self.waste) == 0:
-                return False
-            self.waste.reverse()
-            self.deck, self.waste = self.waste, []
-        self.waste.append(self.deck.pop())
-        return True
-
-    def pop_waste_card(self):
-        if len(self.waste) > 0:
-            return self.waste.pop()
-
+    def deal_from_deck(self):
+        if self.deck.cards:
+            card = self.deck.deal_card()
+            card.flip()
+            self.waste_pile.append(card)
 
 class CardWidget(Widget):
-    def __init__(self, card, tableau_index, game, **kwargs):
+    def __init__(self, card, tableau_index=None, game=None, is_waste=False, on_select=None, **kwargs):
         super().__init__(**kwargs)
         self.card = card
         self.tableau_index = tableau_index
+        self.is_waste = is_waste
+        self.game = game
         self.size_hint = (None, None)
         self.size = (80, 120)
         self.is_selected = False
-        self.game = game
-        self.label = Label(text=str(self.card), size=self.size, pos=self.pos)
-        self.add_widget(self.label)
-
+        self.on_select = on_select
         self.bind(pos=self.update_position, size=self.update_position)
         self.draw_card()
 
-    def update_position(self, *args):
-        self.label.pos = self.pos
-
     def draw_card(self):
-        # For now, just display the card's title
-        if self.card.is_face_up:
-            self.label.text = self.card.title
-        else:
-            self.label.text = "?"
+        self.canvas.clear()
+        with self.canvas:
+            if self.card.is_face_up and self.card.is_red():
+                Color(1, 0, 0, 1)
+                Rectangle(pos=self.pos, size=self.size)
+                Color(0, 0, 0, 1)
+                Line(rectangle=(self.x, self.y, self.width, self.height), width=1)
+                self.add_widget(Label(text=f"{self.card.rank}{self.card.suit}", pos=self.pos, color=(1, 1, 1, 1)))
+            elif self.card.is_face_up and self.card.is_black():
+                Color(0, 1, 1, 1)
+                Rectangle(pos=self.pos, size=self.size)
+                Color(0, 0, 0, 1)
+                Line(rectangle=(self.x, self.y, self.width, self.height), width=1)
+                self.add_widget(Label(text=f"{self.card.rank}{self.card.suit}", pos=self.pos, color=(1, 1, 1, 1)))
+            else:
+                Color(0.5, 0.5, 0.5, 1)
+                Rectangle(pos=self.pos, size=self.size)
+                Color(0, 0, 0, 1)
+                Line(rectangle=(self.x, self.y, self.width, self.height), width=1)
+
+    def update_position(self, *args):
+        self.draw_card()
 
     def on_touch_down(self, touch):
         if self.collide_point(*touch.pos):
-            if not self.is_selected:
-                self.select_card()
-            else:
-                selected_cards = self.game.get_selected_cards()
-                if self.game.tableau.tableau_to_tableau(self.tableau_index, selected_cards.tableau_index):
-                    self.game.move_cards(selected_cards)
+            self.on_select(self)
             return True
         return super().on_touch_down(touch)
-
-    def select_card(self):
-        self.is_selected = True
-        self.game.selected_card_widget = self
-        self.label.text = f"[Selected] {self.card.title}"
-
 
 class SolitaireWidget(Widget):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.game = SolitaireGame()
-        self.selected_card_widget = None
+        self.game = Solitaire()
+        self.selected_cards_widgets = []  # Changed to track multiple selected cards
         self.setup_tableau()
+        self.setup_deck_button()
 
     def setup_tableau(self):
-        for col_index, col in self.game.tableau.flipped.items():
-            for row_index, card in enumerate(col):
-                card_widget = CardWidget(card, col_index, self.game)
-                card_widget.pos = (col_index * 90, 600 - row_index * 30)  # Example positioning
+        self.clear_widgets()  # This will be used to clear the waste pile later
+        card_width, card_height = 80, 120
+        padding = 20
+        tableau_width = Window.width - 2 * padding
+        card_spacing = (tableau_width - 7 * card_width) / 6
+        y_offset = 200  # Adjust this to shift the tableau down
+
+        # Setup tableau
+        for i, pile in enumerate(self.game.tableau):
+            for j, card in enumerate(pile):
+                x = padding + i * (card_width + card_spacing)
+                y = Window.height - y_offset - j * card_height * 0.3
+                card_widget = CardWidget(card, tableau_index=i, game=self.game, on_select=self.select_card)
+                card_widget.pos = (x, y)
                 self.add_widget(card_widget)
 
+        # Setup foundation
+        foundation_spacing = 20
+        foundation_width = Window.width - 2 * foundation_spacing
+        foundation_card_spacing = (foundation_width - 4 * card_width) / 3
+        foundation_y = Window.height - 50
+
+        for i in range(4):
+            x = foundation_spacing + i * (card_width + foundation_card_spacing)
+            foundation_pile = Widget(size=(card_width, card_height))
+            foundation_pile.pos = (x, foundation_y)
+            with foundation_pile.canvas:
+                Color(0, 1, 0, 1)
+                Rectangle(pos=foundation_pile.pos, size=foundation_pile.size)
+                Line(rectangle=(x, foundation_y, card_width, card_height), width=1)
+            self.add_widget(foundation_pile)
+
+        # Setup waste pile
+        self.waste_pile_widget = Widget(size=(card_width, card_height))
+        self.waste_pile_widget.pos = (padding + card_width + foundation_card_spacing, foundation_y - card_height - 20)
+        self.add_widget(self.waste_pile_widget)
+
+    def setup_deck_button(self):
+        button = Button(text="Draw Card", size_hint=(None, None), size=(100, 50), pos=(20, Window.height - 70))
+        button.bind(on_press=self.deal_from_deck)
+        self.add_widget(button)
+
+    def deal_from_deck(self, *args):
+        self.game.deal_from_deck()
+        self.refresh_waste_pile()
+
+    def refresh_waste_pile(self):
+        """Display the top card in the waste pile."""
+        if self.game.waste_pile:
+            self.clear_widgets()  # Clear previous waste card
+            card = self.game.waste_pile[-1]
+            waste_card_widget = CardWidget(card, is_waste=True, on_select=self.select_card)
+            waste_card_widget.pos = (self.waste_pile_widget.x, self.waste_pile_widget.y)  # Keep it at the designated position
+            self.add_widget(waste_card_widget)
+
+    def move_card(self, from_widget, to_widget):
+        from_pile = self.game.tableau[from_widget.tableau_index] if from_widget.tableau_index is not None else self.game.waste_pile
+        to_pile = self.game.tableau[to_widget.tableau_index] if to_widget.tableau_index is not None else self.game.foundation[0]  # Example: moving to the first foundation pile
+
+        # Move multiple cards as a stack
+        if self.selected_cards_widgets:
+            # Ensure the source pile is not empty
+            if from_pile:  # Check if there are cards in the source pile
+                cards_to_move = [widget.card for widget in self.selected_cards_widgets]
+                for _ in range(len(cards_to_move)):
+                    if from_pile:  # Check if there are still cards to pop
+                        from_pile.pop()  # Remove the top card from the source pile
+                to_pile.extend(cards_to_move)  # Add the stack to the target pile
+
+                # Flip top card if needed
+                if from_pile and not from_pile[-1].is_face_up:
+                    from_pile[-1].flip()
+
+                self.setup_tableau()  # Refresh tableau
+
     def select_card(self, card_widget):
-        if self.selected_card_widget is None:
-            self.selected_card_widget = card_widget
-        elif self.selected_card_widget == card_widget:
-            self.selected_card_widget = None
+        # Check if the card is face up
+        if not card_widget.card.is_face_up:
+            return
+
+        if card_widget not in self.selected_cards_widgets:
+            self.selected_cards_widgets.append(card_widget)
         else:
-            if self.game.tableau.tableau_to_tableau(card_widget.tableau_index, self.selected_card_widget.tableau_index):
-                self.move_cards(self.selected_card_widget, card_widget)
-            self.selected_card_widget = None
+            # Move if double-clicked
+            if len(self.selected_cards_widgets) > 0:
+                anim = Animation(pos=card_widget.pos, duration=0.2)
+                anim.start(card_widget)
 
-    def move_cards(self, from_widget, to_widget):
-        # UI movement logic
-        from_widget.pos, to_widget.pos = to_widget.pos, from_widget.pos
+                # Perform the move when the last selected card is clicked again
+                if self.selected_cards_widgets[-1] == card_widget:
+                    self.move_card(card_widget, self.selected_cards_widgets[-1])
 
-
-class SolitaireGame:
-    def __init__(self):
-        self.deck = Deck()
-        self.tableau = Tableau([self.deck.deal_cards(x) for x in range(1, 8)])
-        self.foundation = Foundation()
-        self.stock_waste = StockWaste(self.deck.deal_cards(24))
-
-    def get_selected_cards(self):
-        # Return the selected card or stack from the tableau
-        return self.selected_card_widget
-
+        # Reset selection if the stack has only one card
+        if len(self.selected_cards_widgets) == 1 and self.selected_cards_widgets[0] != card_widget:
+            self.selected_cards_widgets = [card_widget]
 
 class SolitaireApp(App):
     def build(self):
-        return SolitaireWidget()
+        layout = FloatLayout()
+        game_widget = SolitaireWidget()
+        layout.add_widget(game_widget)
+        return layout
 
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     SolitaireApp().run()
+
