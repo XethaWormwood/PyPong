@@ -8,7 +8,7 @@ from kivy.uix.button import Button
 from kivy.core.window import Window
 from kivy.animation import Animation
 from kivy.uix.popup import Popup
-
+from kivy.uix.gridlayout import GridLayout
 
 
 class Card:
@@ -85,7 +85,7 @@ class Solitaire:
 
     def rank_difference(self, card1, card2):
         rank_map = {'A': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13}
-        return rank_map[card1.rank] - rank_map[card2.rank]
+        return abs(rank_map[card1.rank] - rank_map[card2.rank])
     
     def is_game_won(self):
         return all(len(pile) == 13 for pile in self.foundation)
@@ -93,7 +93,7 @@ class Solitaire:
     def check_win(self):
         if self.is_game_won():
             popup = Popup(title='Congratulations!',
-                          content=Label(text='You Wone the Game!'),
+                          content=Label(text='You Won the Game!'),
                           size_hint=(None, None), size=(400, 200))
             popup.open()
 
@@ -108,26 +108,84 @@ class Solitaire:
     def is_valid_tableau_move(self, from_card, to_card):
         if to_card is None:
             return from_card.rank == 'K'
-        return to_card.is_red() != from_card.is_red() and self.rank_difference(to_card, from_card) == -1
+        return to_card.is_red() != from_card.is_red() and self.rank_difference(from_card, to_card) == -1
+
+
+class FoundationWidget(Widget):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        foundation_index = None
+        self.foundation_index = foundation_index
+        self.cards = []  # To hold the cards in this foundation
+        self.max_cards = 13  # Maximum cards (for Ace to King)
+        
+        # Drawing the initial visual representation of the foundation
+        with self.canvas:
+            self.color = Color(1, 1, 1, 1)  # Default color (white)
+            self.rect = Rectangle(pos=self.pos, size=self.size)
+
+        # Bind the size and position to update the rectangle when changed
+        self.bind(size=self._update_rect, pos=self._update_rect)
+
+    def add_card(self, card):
+        """Method to add a card to the foundation."""
+        if self.can_add_card(card):
+            self.cards.append(card)
+            self._update_rect()
+            self.draw_card(card)
+
+    def draw_card(self, card):
+        """Draws the top card of the foundation."""
+        if card.is_face_up:
+            with self.canvas:
+                Color(1, 0, 0, 1) if card.is_red() else Color(0, 0, 0, 1)
+                Rectangle(pos=self.pos, size=self.size)
+
+    def _update_rect(self, *args):
+        """Update the rectangle size and position."""
+        self.rect.pos = self.pos
+        self.rect.size = self.size
+
+    def clear_foundation(self):
+        """Clear the foundation."""
+        self.cards.clear()
+        self.canvas.clear()
+        self._update_rect()  # Update the visual representation
+
+    def can_add_card(self, card):
+        """Check if a card can be added according to Solitaire rules."""
+        # Implement the logic to determine if the card can be added
+        if not self.cards:  # If foundation is empty
+            return card.rank == 'A'  
+        
+        # Logic for checking the last card in the foundation and rules
+        top_card = self.cards[-1]
+        return (top_card.suit == card.suit) and (self.rank_difference(card, top_card) == 1)
+
+
 
 class CardWidget(Widget):
-    def __init__(self, card, tableau_index=None, foundation_index=None, game=None, is_waste=False, on_select=None, **kwargs):
+    def __init__(self, card, tableau_index, foundation_index, game, is_waste, on_select, auto_move, foundation_widget=None, **kwargs):
         super().__init__(**kwargs)
         self.card = card
-        self.tableau_index = tableau_index
+        self.tableau_layouts = []
+        self.tableau_index = tableau_index if tableau_index is not None else -1
         self.is_waste = is_waste
         self.game = game
         self.size_hint = (None, None)
         self.size = (80, 120)
         self.is_selected = False
         self.on_select = on_select
+        self.auto_move = auto_move
+        self.foundation_widget = foundation_widget
         self.is_being_dragged = False
         self.drag_offset = (0, 0)
         self.original_pos = self.pos
-        self.bind(pos=self.update_position, size=self.update_position)
+        self.bind(on_touch_down=self.on_touch_down)
         self.draw_card()
         self.foundation_index = foundation_index
         self.parent_layout = None
+        self.x, self.y = kwargs.get('pos', (0, 0))
 
     def draw_card(self):
         self.canvas.clear()
@@ -135,14 +193,15 @@ class CardWidget(Widget):
         with self.canvas:
             if self.card.is_face_up and self.card.is_red():
                 Color(1, 0, 0, 1)
-            elif self.card.is_face_up and self.card.is_black():
+            elif self.card.is_face_up:
                 Color(0, 0, 0, 1)
             else:
                 Color(0.5, 0.5, 0.5, 1)
             Rectangle(pos=self.pos, size=self.size)
-
             Color(0, 0, 0, 1) 
             Line(rectangle=(self.x, self.y, self.width, self.height), width=1)
+            Color(1, 1, 1, 1)
+            Line(rectangle=(self.x + 2, self.y + 2, self.width - 4, self.height - 4), width=2)
 
         # Remove the label only if the card is face-down
         if not self.card.is_face_up and hasattr(self, 'label'):
@@ -151,10 +210,11 @@ class CardWidget(Widget):
 
         if self.card.is_face_up and not hasattr(self, 'label'):
             self.label = Label(text=f"{self.card.rank}{self.card.suit}", 
-                               color=(1, 1, 1, 1),
+                               color=(0, 0, 1, 1),
                                size_hint=(None, None), 
                                size=(80, 30))
             self.add_widget(self.label)
+            self.canvas.ask_update()
         if hasattr(self, 'label'):
             self.label.center = self.center
 
@@ -162,7 +222,7 @@ class CardWidget(Widget):
         if hasattr(self, 'label'):
             self.label.center = self.center
 
-    def on_touch_down(self, touch):
+    def on_touch_down(self, touch, *args):
         if self.collide_point(*touch.pos):
             self.is_being_dragged = True
             self.original_pos = self.pos
@@ -173,16 +233,25 @@ class CardWidget(Widget):
                 parent_layout.add_widget(self)
             if not self.card.is_face_up and self.is_top_card():
                 self.card.flip()
-                self.draw_card()
-            else:
-                if self.on_select:
-                    self.on_select(self)
+            self.on_select(self)
             return True
-        return super().on_touch_down(touch)
+        return super().on_touch_down(touch, *args)
+    
+    def on_double_tap(self, touch):
+        if self.collide_point(*touch.pos):
+            self.auto_move(self)
+            return True
+        return super().on_double_tap(touch)
 
     def on_touch_move(self, touch):
         if self.is_being_dragged:
-            self.pos = (touch.x + self.drag_offset[0], touch.y + self.drag_offset[1])
+            new_x = touch.x + self.drag_offset[0]
+            new_y = touch.y + self.drag_offset[1]
+
+            new_x = max(0, min(new_x, Window.width - self.width))
+            new_y = max(0, min(new_y, Window.height - self.height))
+
+            self.pos = (new_x, new_y)
 
             if hasattr(self, 'label'):
                 self.label.center = self.center
@@ -194,34 +263,30 @@ class CardWidget(Widget):
         if self.is_being_dragged:
             self.is_being_dragged = False
 
-            # Check for drop on foundation first
-            for i, foundation_widget in enumerate(self.parent.foundation_widgets):
-                if foundation_widget.collide_point(*touch.pos):
-                    if self.parent.game.move_to_foundation(self.card, i):
-                        # Successful move to foundation
-                        self.parent.remove_widget(self)
-                        self.parent.setup_tableau()  # Refresh tableau in case a card was revealed
-                        self.parent.game.check_win()
-                        return True
-                    else:
-                        # Invalid move, animate back to original position
-                        anim = Animation(pos=self.original_pos, duration=0.2)
-                        anim.start(self)
-                        return True
+        # Check for foundation moves
+            if self.foundation_widget:
+                for i, foundation_widget in enumerate(self.foundation_widget):
+                    if foundation_widget.collide_point(*touch.pos):
+                        if self.parent.game.move_to_foundation(self.card, i):
+                            self.parent.remove_widget(self)
+                            self.parent.setup_tableau()  # Refresh tableau
+                            self.parent.game.check_win()
+                            return True
+                        else:
+                            self.animate_back()
 
-            # Then check for drop on tableau piles
-            for i, pile_widgets in enumerate(self.parent.tableau_widgets):
+        # Check for tableau moves
+            for i, pile_widgets in enumerate(self.tableau_layouts):
                 if pile_widgets and pile_widgets[-1].collide_point(*touch.pos):
-                    if self.parent.attempt_move_to_tableau(self, i): 
-                        return True 
+                    if self.parent.attempt_move_to_tableau(self, i):
+                        return True
                     else:
-                        anim = Animation(pos=self.original_pos, duration=0.2)
-                        anim.start(self)
+                        self.animate_back()
                         return True
 
-            # Handle move from waste pile to tableau
+        # Handle move from waste pile to tableau
             if self.is_waste:
-                for i, pile_widget in enumerate(self.parent.tableau_widgets):
+                for i, pile_widget in enumerate(self.tableau_layouts):
                     if pile_widget and pile_widget[-1].collide_point(*touch.pos):
                         if self.parent.game.move_from_waste_to_tableau(self.card, i):
                             self.parent.remove_widget(self)
@@ -229,79 +294,125 @@ class CardWidget(Widget):
                             self.parent.setup_tableau()
                             return True
                         else:
-                            anim = Animation(pos=self.original_pos, duration=0.2)
-                            anim.start(self)
+                            self.animate_back()
                             return True
 
-            return True 
         return super().on_touch_up(touch)
+    
+    def animate_back(self):
+        anim = Animation(pos=self.original_pos, duration=0.2)
+        anim.start(self)
+
 
     def is_top_card(self):
         """Return True if the card is the top card in the pile."""
-        return self.card == self.parent.game.tableau[self.tableau_index][-1]
+        if self.tableau_index >= 0:
+            return self.card == self.parent.game.tableau[self.tableau_index][-1]
+        return False
+
 
 class SolitaireWidget(Widget):
     def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
-        with self.canvas.before:
-            Color(0.1, 0.6, 0.1, 1)
-            self.bg_rect = Rectangle(pos=(0, 0), size=Window.size)
+        super(SolitaireWidget, self).__init__(**kwargs)
+        self.foundation_widget = []
+        self.tableau_layouts = []
+        self.waste_pile_widgets = []
 
         self.game = Solitaire()
         self.selected_cards_widgets = []
-        self.tableau_widgets = [[] for _ in range(7)]
-        self.setup_tableau()
-        self.setup_deck_button()
+
         self.setup_foundation()
-        self.pile_widget = self.tableau_widgets
+        self.setup_deck_button()
+
+        for i in range(7):
+            layout = GridLayout(cols=1, spacing=10, size_hint_y=None)
+            layout.bind(minimum_height=layout.setter('height'))
+            self.tableau_layouts.append(layout)
+            self.add_widget(layout)
+
+        self.setup_tableau()
+        self.refresh_waste_pile()
 
         Window.bind(on_resize=self.update_background)
 
     def update_background(self, instance, width, height):
         self.bg_rect.size = (width, height)
+        self.reposition_cards()
 
     def setup_foundation(self):
         card_width, card_height = 80, 120
         padding = 20
-        foundation_y = Window.height - 50
+        foundation_y = Window.height - card_height - 20
 
-        self.foundation_widgets = []
+        self.foundation_widget = []
         for i in range(4):
-            foundation_widget = Widget(size=(card_width, card_height))
-            foundation_widget.pos = (padding + i * (card_width + 20), foundation_y)
-            self.foundation_widgets.append(foundation_widget)
-            self.add_widget(foundation_widget)
+            foundation = FoundationWidget()
+            self.foundation_widget.append(foundation)
+            self.add_widget(foundation)
+            foundation.size = (card_width, card_height)
+            foundation.pos = (padding + i * (card_width + padding), foundation_y)
+            with foundation.canvas:
+                Color(1, 0, 1, 1)
+                Rectangle(pos=foundation.pos, size=foundation.size)
+            
+        self.canvas.ask_update()
 
 
     def setup_tableau(self):
-        self.clear_widgets()
+        for layout in self.tableau_layouts:
+            layout.clear_widgets()
+        for widget in self.children[:]:
+           if isinstance(widget, CardWidget):
+               self.remove_widget(widget)
+
         card_width, card_height = 80, 120
         padding = 20
         tableau_width = Window.width - 2 * padding
         card_spacing = (tableau_width - 7 * card_width) / 6
-        y_offset = Window.height - card_height - padding
+        y_offset = 150  # Adjust this to shift the tableau down
 
-        self.tableau_widgets = [[] for _ in range(7)]
-
+        # Setup tableau
         for i, pile in enumerate(self.game.tableau):
             for j, card in enumerate(pile):
                 x = padding + i * (card_width + card_spacing)
-                y = Window.height - y_offset - j * 30
-                card_widget = CardWidget(card, tableau_index=i, game=self.game, on_select=self.select_card)
-                card_widget.pos = (x, y)
-                self.add_widget(card_widget)
-                self.tableau_widgets[i].append(card_widget)
+                y = Window.height - y_offset - j * (card_height // 2)
+                print(f"Card {card.rank}{card.suit}: x={x}, y={y}")
+                card_widget = CardWidget(
+                    card,
+                    tableau_index=i,
+                    foundation_index=None,
+                    is_waste=False,
+                    game=self.game,
+                    on_select=self.select_card,
+                    auto_move=self.auto_move_card
+                )
+                self.tableau_layouts[i].add_widget(card_widget)
+        self.canvas.ask_update()
 
-        foundation_y = Window.height - 50
-        self.waste_pile_widget = Widget(size=(card_width, card_height))
-        self.waste_pile_widget.pos = (padding + card_width * 2, foundation_y - card_height - 20)
-        self.add_widget(self.waste_pile_widget)
+    def move_card(self, from_widget, to_widget):
+        from_pile = self.game.tableau[from_widget.tableau_index]
+        to_pile = self.game.tableau[to_widget.tableau_index]
+    
+        if not from_pile:
+            print("No cards to move from the selected pile.")
+            return False
+
+        card = from_pile.pop()  # Remove the card from the current pile
+        if self.game.is_valid_move(card, to_widget.card if to_widget.card else None):
+            to_pile.append(card)  # Add it to the target pile
+            self.setup_tableau()  # Refresh tableau to update positions
+            print(f"Moved card {card.rank}{card.suit} from pile {from_widget.tableau_index} to {to_widget.tableau_index}.")
+            return True
+        else:
+            from_pile.append(card)  # If the move is invalid, put the card back
+            print("Invalid move attempted.")
+            return False
 
     def setup_deck_button(self):
         button = Button(text="Draw Card", size_hint=(None, None), size=(100, 50), pos=(20, 20))
         button.bind(on_press=self.deal_from_deck)
         self.add_widget(button)
+        self.canvas.ask_update()
 
     def attempt_move_to_tableau(self, from_widget, to_tableau_index):
         if from_widget.is_waste:
@@ -316,9 +427,48 @@ class SolitaireWidget(Widget):
                 cards_to_move = from_pile[moving_index:]
                 from_pile[moving_index:] = []
                 to_pile.extend(cards_to_move)
+                self.tableau_layouts[from_widget.tableau_index].remove_widget(from_widget)
+                self.tableau_layouts[to_tableau_index].add_widget(from_widget)
+                from_widget.tableau_index = to_tableau_index
                 self.setup_tableau()
                 return True
             return False
+
+
+    def auto_move_card(self, card_widget):
+        """Automatically move card to a valid foundation or tableau if double-clicked."""
+        card = card_widget.card
+    
+        # Try to move to a foundation first
+        for foundation_index in range(4):
+            if self.game.is_valid_foundation_move(card, foundation_index):
+                # Move the card to the foundation
+                self.game.move_to_foundation(card, foundation_index)
+                self.remove_widget(card_widget)
+                self.setup_tableau()  # Refresh tableau after the move
+                self.game.check_win()  # Check if the player has won
+                return
+
+        # If no foundation move is possible, try to move to a valid tableau pile
+        for tableau_index in range(7):
+            if self.game.move_from_waste_to_tableau(card, tableau_index):
+                # If the card is in the waste pile, attempt to move it to tableau
+                self.remove_widget(card_widget)
+                self.setup_tableau()  # Refresh tableau after the move
+                return
+        
+            # Check if the card can be moved within tableau piles
+            top_card = self.game.tableau[tableau_index][-1] if self.game.tableau[tableau_index] else None
+            if self.game.is_valid_tableau_move(card, top_card):
+                # Perform the move to the tableau
+                self.game.tableau[tableau_index].append(card)
+                self.remove_widget(card_widget)
+                self.setup_tableau()  # Refresh tableau after the move
+                return
+
+        # If no valid move was found, the card remains in place
+        anim = Animation(pos=card_widget.original_pos, duration=0.2)
+        anim.start(card_widget)
 
 
     def deal_from_deck(self, *args):
@@ -326,12 +476,24 @@ class SolitaireWidget(Widget):
         self.refresh_waste_pile()
 
     def refresh_waste_pile(self):
+        for card_widget in self.waste_pile_widgets:
+            self.remove_widget(card_widget)
         self.waste_pile_widgets = []
-        for card in self.card.waste_pile:
-            card_widget = CardWidget(card)
+        for card in self.game.waste_pile:
+            card_widget = CardWidget(
+                card,
+                tableau_index=None,
+                foundation_index=None,
+                is_waste=True,
+                game=self.game,
+                on_select=self.select_card,
+                auto_move=self.auto_move_card,
+                foundation_widget=self.foundation_widget
+            )
+
             self.waste_pile_widgets.append(card_widget)
             self.add_widget(card_widget)
-        self.reposition_cards()
+        self.canvas.ask_update()
 
     def select_card(self, card_widget):
         if not card_widget.card.is_face_up:
@@ -365,8 +527,8 @@ class SolitaireWidget(Widget):
             anim.start(from_widget)
             return False
 
-        from_pile_widgets = self.tableau_widgets[from_widget.tableau_index]
-        to_pile_widgets = self.tableau_widgets[to_widget.tableau_index]
+        from_pile_widgets = self.tableau_layouts[from_widget.tableau_index]
+        to_pile_widgets = self.tableau_layouts[to_widget.tableau_index]
         moving_index = from_pile_widgets.index(from_widget)
 
         cards_to_move_widgets = from_pile_widgets[moving_index:]
@@ -385,20 +547,6 @@ class SolitaireWidget(Widget):
             if not top_card_widget.card.is_face_up:
                 top_card_widget.card.flip()
                 top_card_widget.draw_card()
-
-    def reposition_cards(self):
-        card_width, card_height = 80, 120
-        padding = 20
-        tableau_width = Window.width - 2 * padding
-        card_spacing = (tableau_width - 7 * card_width) / 6
-        y_offset = Window.height - card_height - padding
-
-        for i, pile_widgets in enumerate(self.tableau_widgets):
-            x_offset = padding + i * 30
-            for j, card_widget in enumerate(pile_widgets):
-                y = y_offset - j * 30
-                anim = Animation(pos=(x_offset, y), duration=0.2)
-                anim.start(card_widget)
 
 
 
