@@ -19,7 +19,7 @@ SPACESHIP_SIZE = 40
 INITIAL_LIVES = 3
 BULLET_COOLDOWN = 0.2
 INVINCIBILITY_DURATION = 2.0
-ASTEROID_SPAWN_INTERVAL = 2.0
+ASTEROID_SPAWN_INTERVAL = 1.2
 SCORE_INCREMENT = 10
 
 # Key mappings
@@ -45,7 +45,7 @@ class Spaceship(Widget):
         super().__init__(**kwargs)
         self.velocity = Vector(0, 0)
         self.angle = 0
-        self.thrust = 20
+        self.thrust = 50
         self.turn_speed = 5
         self.drag = 0.78
         self.last_shot_time = 0
@@ -193,8 +193,6 @@ class HostileAsteroid(Asteroid):
         self.velocity = direction * self.speed
         super().move()
 
-
-
 class AsteroidGame(Widget):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -258,7 +256,8 @@ class AsteroidGame(Widget):
         self.level += 1
         self.exp_to_next_level += 50
         self.asteroid_spawn_rate *= 0.9
-        Clock.unschedule(self.spawn_asteroid, self.asteroid_spawn_rate)
+        Clock.unschedule(self.spawn_asteroid)
+        Clock.schedule_interval(self.spawn_asteroid, self.asteroid_spawn_rate)
         self.level_label.text = f"Level: {self.level}"
 
     def shoot_bullet(self):
