@@ -11,9 +11,9 @@ from math import sqrt
 
 # Constants
 ASTEROID_MIN_SPEED = 2
-ASTEROID_MAX_SPEED = 6
-ASTEROID_MIN_SIZE = 40
-ASTEROID_MAX_SIZE = 80
+ASTEROID_MAX_SPEED = 2
+ASTEROID_MIN_SIZE = 25
+ASTEROID_MAX_SIZE = 40
 BULLET_SPEED = 15
 SPACESHIP_SIZE = 40
 INITIAL_LIVES = 3
@@ -28,6 +28,7 @@ KEY_LEFT = 'left'
 KEY_RIGHT = 'right'
 KEY_SHOOT = 'spacebar'
 KEY_PAUSE = 'p'
+KEY_RESTART = 'r'
 
 # Load sounds
 shoot_sound = SoundLoader.load('shoot.wav')
@@ -38,6 +39,8 @@ background_music = SoundLoader.load('background_music.mp3')
 def play_sound(sound):
     if sound:
         sound.play()
+    if sound == None:
+        pass
 
 
 class Spaceship(Widget):
@@ -53,7 +56,7 @@ class Spaceship(Widget):
         self.invincibility_timer = 1
         self.key_states = {KEY_UP: False, KEY_LEFT: False, KEY_RIGHT: False}
         with self.canvas:
-            self.color = Color(1, 1, 1)
+            self.color = Color(0, 0, 1)
             self.shape = Line(width=2)
         self.update_shape()
 
@@ -100,11 +103,11 @@ class Spaceship(Widget):
 
     def flash_effect(self, dt):
         if self.invincibility_timer > 0:
-            self.color.rgb = (1, 1, 0) if self.color.rgb == (1, 1, 1) else (1, 1, 1)
+            self.color.rgb = (1, 0, 0) if self.color.rgb == (1, 0, 1) else (1, 0, 1)
             self.invincibility_timer -= dt
         else:
             self.invincible = False
-            self.color.rgb = (1, 1, 1)
+            self.color.rgb = (0, 0, 1)
             Clock.unschedule(self.flash_effect)
 
 
@@ -167,6 +170,8 @@ class Pickup(Widget):
                 Color(0, 0, 1)  # Blue for shield
             elif self.effect == "score_multiplier":
                 Color(1, 1, 0)  # Yellow for score multiplier
+            elif self.effect == "fire_rate":
+                Color(1, 0, 1) # Purple for doubled fire rate
             self.shape = Ellipse(size=self.size, pos=self.pos)
 
     def apply_effect(self, game):
@@ -178,8 +183,10 @@ class Pickup(Widget):
         elif self.effect == "score_multiplier":
             game.score += 100
             game.score_label.text = f"Score: {game.score}"
-
-
+        elif self.effect == "fire_rate":
+            game.apply_fire_rate_effect()
+ 
+ 
 class HostileAsteroid(Asteroid):
     def __init__(self, target, **kwargs):
         super().__init__(**kwargs)
@@ -208,6 +215,7 @@ class AsteroidGame(Widget):
         self.exp_to_next_level = 50
         self.paused = False
         self.asteroid_spawn_rate = ASTEROID_SPAWN_INTERVAL
+        self.current_bullet_cooldown = BULLET_COOLDOWN
 
         # Background setup
         with self.canvas.before:
@@ -225,7 +233,7 @@ class AsteroidGame(Widget):
         # Scheduling game updates
         Clock.schedule_interval(self.update, 1.0 / 60.0)
         Clock.schedule_interval(self.spawn_asteroid, self.asteroid_spawn_rate)
-        Clock.schedule_interval(self.spawn_pickup, 10.0)
+        Clock.schedule_interval(self.spawn_pickup, 6.0)
 
     def toggle_pause(self):
         self.paused = not self.paused
@@ -233,7 +241,7 @@ class AsteroidGame(Widget):
     def spawn_pickup(self, dt):
         if self.paused:
             return
-        effect = ["health", "shield", "score_multiplier"][randint(0, 2)]
+        effect = ["health", "shield", "score_multiplier", "fire_rate"][randint(0, 3)]
         pickup = Pickup(effect)
         self.add_widget(pickup)
         self.pickups.append(pickup)
@@ -254,6 +262,7 @@ class AsteroidGame(Widget):
 
     def level_up(self):
         self.level += 1
+        self.lives += 1
         self.exp_to_next_level += 50
         self.asteroid_spawn_rate *= 0.9
         Clock.unschedule(self.spawn_asteroid)
@@ -261,12 +270,17 @@ class AsteroidGame(Widget):
         self.level_label.text = f"Level: {self.level}"
 
     def shoot_bullet(self):
-        if Clock.get_time() - self.spaceship.last_shot_time >= BULLET_COOLDOWN:
+        if Clock.get_time() - self.spaceship.last_shot_time >= self.current_bullet_cooldown:
             play_sound(shoot_sound)
             bullet = Bullet(self.spaceship)
             self.add_widget(bullet)
             self.bullets.append(bullet)
             self.spaceship.last_shot_time = Clock.get_time()
+
+    def apply_fire_rate_effect(self):
+        """Permanently decreases the bullet cooldown by a factor."""
+        cooldown_reduction = 0.9
+        self.current_bullet_cooldown *= cooldown_reduction
 
     def update(self, dt):
         if self.paused:
@@ -282,6 +296,7 @@ class AsteroidGame(Widget):
             if not (0 <= bullet.x <= Window.width and 0 <= bullet.y <= Window.height):
                 self.bullets.remove(bullet)
                 self.remove_widget(bullet)
+
 
         # Move asteroids
         for asteroid in self.asteroids[:]:
@@ -321,13 +336,26 @@ class AsteroidGame(Widget):
 
     def game_over(self):
         self.paused = True
-        game_over_label = Label(text="Game Over!", font_size=50, pos=(Window.width / 2 - 100, Window.height / 2))
-        self.add_widget(game_over_label)
+        if not hasattr(self, 'game_over_label'):
+            self.game_over_label = Label(
+                text="Game Over! Press 'r' to Restart!",
+                font_size=50,
+                pos=(Window.width / 2 - 100, Window.height / 2),
+                size_hint=(None, None)
+            )
+            self.add_widget(self.game_over_label)
 
     def check_collision(self, obj1, obj2):
-        dist = sqrt((obj1.center_x - obj2.center_x) ** 2 + (obj1.center_y - obj2.center_y) ** 2)
-        collision_radius = (obj1.width / 2) + (obj2.width / 2)
-        return dist < collision_radius
+            # Calculate the squared distance between the objects
+        dx = obj1.center_x - obj2.center_x
+        dy = obj1.center_y - obj2.center_y
+        dist_squared = dx ** 2 + dy ** 2
+    
+    # Calculate the squared collision radius
+        collision_radius_squared = ((obj1.width / 2) + (obj2.width / 2)) ** 2
+    
+    # Return True if within collision radius
+        return dist_squared < collision_radius_squared
 
     def on_key_down(self, window, key, scancode, codepoint, modifiers):
         if key == 112:  # 'P' for pause
@@ -340,6 +368,8 @@ class AsteroidGame(Widget):
             self.spaceship.key_states["left"] = True
         elif key == 275:  # Right arrow for rotation
             self.spaceship.key_states["right"] = True
+        elif key == 114 and self.paused: # Pressing R will restart the game if its paused or Game Over
+            self.restart_game()
 
     def on_key_up(self, window, key, scancode):
         if key == 273:  # Up arrow for forward thrust
@@ -348,6 +378,52 @@ class AsteroidGame(Widget):
             self.spaceship.key_states["left"] = False
         elif key == 275:  # Right arrow for rotation
             self.spaceship.key_states["right"] = False
+
+
+    def restart_game(self):
+
+        # Clears the Game Over Label if it exsists
+        if hasattr(self, 'game_over_label'):
+            self.remove_widget(self.game_over_label)
+            del self.game_over_label
+
+        # Clear existing game objects
+        for bullet in self.bullets[:]:
+            self.remove_widget(bullet)
+        for asteroid in self.asteroids[:]:
+            self.remove_widget(asteroid)
+        for pickup in self.pickups[:]:
+            self.remove_widget(pickup)
+
+
+        self.bullets.clear()
+        self.asteroids.clear()
+        self.pickups.clear()
+
+        # Reset game state
+        self.score = 0
+        self.lives = INITIAL_LIVES
+        self.level = 1
+        self.exp = 0
+        self.exp_to_next_level = 50
+        self.paused = False
+        self.asteroid_spawn_rate = ASTEROID_SPAWN_INTERVAL
+        self.current_bullet_cooldown = BULLET_COOLDOWN
+
+        # Reset labels
+        self.score_label.text = f"Score: {self.score}"
+        self.lives_label.text = f"Lives: {self.lives}"
+        self.level_label.text = f"Level: {self.level}"
+
+        # Reposition spaceship
+        self.spaceship.center = (Window.width / 2, Window.height / 2)
+        self.spaceship.velocity = Vector(0, 0)
+        self.spaceship.angle = 0
+        self.spaceship.update_shape()
+
+        # Restart asteroid spawning
+        Clock.unschedule(self.spawn_asteroid)
+        Clock.schedule_interval(self.spawn_asteroid, self.asteroid_spawn_rate)
 
 
 class AsteroidsApp(App):
