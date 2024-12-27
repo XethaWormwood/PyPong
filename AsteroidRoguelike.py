@@ -54,6 +54,8 @@ class Spaceship(Widget):
         self.last_shot_time = 0
         self.invincible = False
         self.invincibility_timer = 1
+        self.is_stone = False
+        self.stone_duration = 0
         self.key_states = {KEY_UP: False, KEY_LEFT: False, KEY_RIGHT: False}
         with self.canvas:
             self.color = Color(0, 0, 1)
@@ -66,17 +68,28 @@ class Spaceship(Widget):
         self.shape.points = [coord for point in rotated_points for coord in point]
 
     def move(self, dt):
-        if self.key_states[KEY_UP]:
-            self.accelerate()
-        if self.key_states[KEY_LEFT]:
-            self.rotate(1)
-        if self.key_states[KEY_RIGHT]:
-            self.rotate(-1)
+        if self.is_stone:
+            self.pos = Vector(*self.pos) + self.velocity
+            self.wrap_around_screen()
+            self.stone_duration -= dt
+            if self.stone_duration <= 0:
+                self.stop_stone()
+        if not self.is_stone:
+            if self.key_states[KEY_UP]:
+                self.accelerate()
+            if self.key_states[KEY_LEFT]:
+                self.rotate(1)
+            if self.key_states[KEY_RIGHT]:
+                self.rotate(-1)
 
-        self.velocity *= self.drag
-        self.pos = Vector(*self.pos) + self.velocity * dt
-        self.wrap_around_screen()
-        self.update_shape()
+            self.velocity *= self.drag
+            self.pos = Vector(*self.pos) + self.velocity * dt
+            self.wrap_around_screen()
+            self.update_shape()
+
+    def stop_stone(self):
+        self.is_stone = False
+        self.color.rgb = (0, 0, 1)
 
     def wrap_around_screen(self):
         if self.x > Window.width:
@@ -110,6 +123,12 @@ class Spaceship(Widget):
             self.color.rgb = (0, 0, 1)
             Clock.unschedule(self.flash_effect)
 
+    def apply_stone(self, duration):
+        self.is_stone = True
+        if self.is_stone is True:
+            self.invincible = True
+        self.stone_duration = duration
+        self.color.rgb = (1, 0, 0)  # Change color to indicate "stone" mode
 
 class Asteroid(Widget):
     def __init__(self, **kwargs):
@@ -117,7 +136,7 @@ class Asteroid(Widget):
         self.size = (randint(ASTEROID_MIN_SIZE, ASTEROID_MAX_SIZE),) * 2
         self.speed = uniform(ASTEROID_MIN_SPEED, ASTEROID_MAX_SPEED)
         self.angle = uniform(0, 360)
-        self.velocity = Vector(self.speed, 0).rotate(self.angle)
+        self.velocity = Vector(0, self.speed).rotate(self.angle)
         self.pos = (randint(0, Window.width - self.width), randint(0, Window.height - self.height))
         with self.canvas:
             Color(0.5, 0.5, 0.5)
@@ -143,6 +162,8 @@ class Bullet(Widget):
     def __init__(self, spaceship, **kwargs):
         super().__init__(**kwargs)
         self.size = (10, 10)
+        self.continuum = False
+        self.big_bullet = False
         tip_position = Vector(0, spaceship.height / 2).rotate(spaceship.angle) + spaceship.center
         self.pos = tip_position - Vector(self.width / 2, self.height / 2)
         self.velocity = Vector(0, BULLET_SPEED).rotate(spaceship.angle)
@@ -153,9 +174,33 @@ class Bullet(Widget):
     def move(self):
         self.pos = Vector(*self.pos) + self.velocity
         self.shape.pos = self.pos
-        if not (0 <= self.x <= Window.width and 0 <= self.y <= Window.height):
-            if self.parent:
-                self.parent.remove_widget(self)
+        if self.continuum is True:
+            self.wrap_around_screen()
+        else:
+            if not (0 <= self.x <= Window.width and 0 <= self.y <= Window.height):
+                if self.parent:
+                    self.parent.remove_widget(self)
+ 
+    def wrap_around_screen(self):
+        if self.x > Window.width:
+            self.x = 0
+        if self.right < 0:
+            self.x = Window.width
+        if self.y > Window.height:
+            self.y = 0
+        if self.top < 0:
+            self.y = Window.height
+
+    def apply_continuum(self):
+        self.continuum = True
+
+    def apply_big_bullet(self):
+        self.big_bullet = True
+        self.size = (15, 15)  # Increase bullet size
+        self.shape.size = self.size  # Update visual size of the bullet
+        self.shape.pos = self.pos  # Adjust position if necessary
+
+
 
 class Pickup(Widget):
     def __init__(self, effect, **kwargs):
@@ -172,6 +217,14 @@ class Pickup(Widget):
                 Color(1, 1, 0)  # Yellow for score multiplier
             elif self.effect == "fire_rate":
                 Color(1, 0, 1) # Purple for doubled fire rate
+            elif self.effect == "stone":
+                Color(1, 1, 1) # White for stone effect
+            elif self.effect == "continuum":
+                Color(0.5, 0.5, 0.8)
+            elif self.effect == "big_bullet":
+                Color(1, 0, 0)
+            elif self.effect == "bomb":
+                Color(0.1, 0.1, 0.1)
             self.shape = Ellipse(size=self.size, pos=self.pos)
 
     def apply_effect(self, game):
@@ -185,12 +238,33 @@ class Pickup(Widget):
             game.score_label.text = f"Score: {game.score}"
         elif self.effect == "fire_rate":
             game.apply_fire_rate_effect()
- 
+        elif self.effect == "stone":
+            game.spaceship.apply_stone(5.0)
+            game.spaceship.set_invincible(5.0)
+        elif self.effect == "continuum":
+            for bullet in game.bullets:
+                bullet.apply_continuum()
+        elif self.effect == "big_bullet":
+            for bullet in game.bullets:
+                bullet.apply_big_bullet()
+        elif self.effect == "bomb":
+            for asteroid in game.asteroids[:]:
+                game.remove_widget(asteroid)
+                game.asteroids.remove(asteroid)
+            self.show_bomb_explosion(game)
+            
+    def show_bomb_explosion(self, game):
+        with game.canvas:
+            Color(1, 0.5, 0, 0.7)
+            explosion = Ellipse(seize=(200, 200), pos=(self.center_x- 100, self.center_y - 100))
+        Clock.schedule_once(lambda dt: game.canvas.remove(explosion), 0.5)
  
 class HostileAsteroid(Asteroid):
     def __init__(self, target, **kwargs):
         super().__init__(**kwargs)
         self.target = target
+        with self.canvas:
+            Color(0.7, 0.7, 0.7)
 
     def move(self):
         # Convert target's center to a Vector
@@ -241,7 +315,7 @@ class AsteroidGame(Widget):
     def spawn_pickup(self, dt):
         if self.paused:
             return
-        effect = ["health", "shield", "score_multiplier", "fire_rate"][randint(0, 3)]
+        effect = ["health", "shield", "score_multiplier", "fire_rate", "stone", "continuum", "big_bullet", "bomb"][randint(0, 7 )]
         pickup = Pickup(effect)
         self.add_widget(pickup)
         self.pickups.append(pickup)
@@ -249,7 +323,7 @@ class AsteroidGame(Widget):
     def spawn_asteroid(self, dt):
         if self.paused:
             return
-        asteroid_type = HostileAsteroid if randint(0, 4) == 0 else Asteroid
+        asteroid_type = HostileAsteroid if randint(0, 8) == 0 else Asteroid
         asteroid = asteroid_type(target=self.spaceship) if asteroid_type == HostileAsteroid else Asteroid()
         if not any(self.check_collision(asteroid, obj) for obj in self.asteroids + [self.spaceship]):
             self.add_widget(asteroid)
@@ -265,6 +339,7 @@ class AsteroidGame(Widget):
         self.lives += 1
         self.exp_to_next_level += 50
         self.asteroid_spawn_rate *= 0.9
+        self.apply_fire_rate_effect
         Clock.unschedule(self.spawn_asteroid)
         Clock.schedule_interval(self.spawn_asteroid, self.asteroid_spawn_rate)
         self.level_label.text = f"Level: {self.level}"
@@ -293,9 +368,10 @@ class AsteroidGame(Widget):
         for bullet in self.bullets[:]:
             bullet.move()
             # Remove bullets out of bounds
-            if not (0 <= bullet.x <= Window.width and 0 <= bullet.y <= Window.height):
-                self.bullets.remove(bullet)
-                self.remove_widget(bullet)
+            if bullet.continuum is False:
+                if not (0 <= bullet.x <= Window.width and 0 <= bullet.y <= Window.height):
+                    self.bullets.remove(bullet)
+                    self.remove_widget(bullet)
 
 
         # Move asteroids
@@ -333,6 +409,13 @@ class AsteroidGame(Widget):
             play_sound(explosion_sound)
             if self.lives <= 0:
                 self.game_over()
+        if self.spaceship.is_stone:
+            # Destroy the asteroid when in stone mode
+            self.remove_widget(asteroid)
+            self.spaceship.set_invincible(5.0)
+            self.score += SCORE_INCREMENT
+            self.score_label.text = f"Score: {self.score}"
+            play_sound(explosion_sound)
 
     def game_over(self):
         self.paused = True
@@ -350,6 +433,8 @@ class AsteroidGame(Widget):
         dx = obj1.center_x - obj2.center_x
         dy = obj1.center_y - obj2.center_y
         dist_squared = dx ** 2 + dy ** 2
+        combined_radius = (obj1.width + obj2.width) / 2
+        return dist_squared <= combined_radius ** 2
     
     # Calculate the squared collision radius
         collision_radius_squared = ((obj1.width / 2) + (obj2.width / 2)) ** 2
