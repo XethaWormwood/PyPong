@@ -21,6 +21,8 @@ BULLET_COOLDOWN = 0.2
 INVINCIBILITY_DURATION = 2.0
 ASTEROID_SPAWN_INTERVAL = 1.2
 SCORE_INCREMENT = 10
+BULLET_SIZE_X = 10
+BULLET_SIZE_Y = 10
 
 # Key mappings
 KEY_UP = 'up'
@@ -112,9 +114,12 @@ class Spaceship(Widget):
     def set_invincible(self, duration):
         self.invincible = True
         self.invincibility_timer = duration
+        Clock.unschedule(self.flash_effect)
         Clock.schedule_interval(self.flash_effect, 0.1)
 
     def flash_effect(self, dt):
+        if self.is_stone:
+            return
         if self.invincibility_timer > 0:
             self.color.rgb = (1, 0, 0) if self.color.rgb == (1, 0, 1) else (1, 0, 1)
             self.invincibility_timer -= dt
@@ -128,7 +133,8 @@ class Spaceship(Widget):
         if self.is_stone is True:
             self.invincible = True
         self.stone_duration = duration
-        self.color.rgb = (1, 0, 0)  # Change color to indicate "stone" mode
+        with self.canvas:
+            Color(1, 0, 0)
 
 class Asteroid(Widget):
     def __init__(self, **kwargs):
@@ -161,7 +167,7 @@ class Asteroid(Widget):
 class Bullet(Widget):
     def __init__(self, spaceship, **kwargs):
         super().__init__(**kwargs)
-        self.size = (10, 10)
+        self.size = (BULLET_SIZE_X, BULLET_SIZE_Y)
         self.continuum = False
         self.big_bullet = False
         tip_position = Vector(0, spaceship.height / 2).rotate(spaceship.angle) + spaceship.center
@@ -196,7 +202,7 @@ class Bullet(Widget):
 
     def apply_big_bullet(self):
         self.big_bullet = True
-        self.size = (15, 15)  # Increase bullet size
+        self.size = (self.size[0] * 1.2, self.size[1] * 1.2)
         self.shape.size = self.size  # Update visual size of the bullet
         self.shape.pos = self.pos  # Adjust position if necessary
 
@@ -254,10 +260,11 @@ class Pickup(Widget):
             self.show_bomb_explosion(game)
             
     def show_bomb_explosion(self, game):
+        self.explosion = Ellipse(size=(200, 200), pos=(self.center_x- 100, self.center_y - 100))
+        game.canvas.add(self.explosion)
         with game.canvas:
             Color(1, 0.5, 0, 0.7)
-            explosion = Ellipse(seize=(200, 200), pos=(self.center_x- 100, self.center_y - 100))
-        Clock.schedule_once(lambda dt: game.canvas.remove(explosion), 0.5)
+        Clock.schedule_once(lambda dt: game.canvas.remove(self.explosion), 0.5)
  
 class HostileAsteroid(Asteroid):
     def __init__(self, target, **kwargs):
@@ -339,7 +346,7 @@ class AsteroidGame(Widget):
         self.lives += 1
         self.exp_to_next_level += 50
         self.asteroid_spawn_rate *= 0.9
-        self.apply_fire_rate_effect
+        self.apply_fire_rate_effect()
         Clock.unschedule(self.spawn_asteroid)
         Clock.schedule_interval(self.spawn_asteroid, self.asteroid_spawn_rate)
         self.level_label.text = f"Level: {self.level}"
@@ -429,18 +436,16 @@ class AsteroidGame(Widget):
             self.add_widget(self.game_over_label)
 
     def check_collision(self, obj1, obj2):
-            # Calculate the squared distance between the objects
-        dx = obj1.center_x - obj2.center_x
-        dy = obj1.center_y - obj2.center_y
-        dist_squared = dx ** 2 + dy ** 2
-        combined_radius = (obj1.width + obj2.width) / 2
-        return dist_squared <= combined_radius ** 2
-    
-    # Calculate the squared collision radius
-        collision_radius_squared = ((obj1.width / 2) + (obj2.width / 2)) ** 2
-    
-    # Return True if within collision radius
-        return dist_squared < collision_radius_squared
+        """Check for collision between two objects based on circular boundaries."""
+        obj1_center = Vector(obj1.center_x, obj1.center_y)
+        obj2_center = Vector(obj2.center_x, obj2.center_y)
+        distance = obj1_center.distance(obj2_center)
+        obj1_radius = obj1.width / 2
+        obj2_radius = obj2.width / 2
+
+        # Check if the distance is less than the sum of their radii
+        return distance < (obj1_radius + obj2_radius)
+
 
     def on_key_down(self, window, key, scancode, codepoint, modifiers):
         if key == 112:  # 'P' for pause
