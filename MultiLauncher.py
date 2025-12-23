@@ -17,8 +17,6 @@ from kivy.animation import Animation
 from kivy.vector import Vector
 from kivy.core.audio import SoundLoader
 
-# Set window size once
-Window.size = (1000, 700)
 
 # ============================================================
 #                        PONG GAME
@@ -2006,4 +2004,5 @@ class ArcadeApp(App):
 
 if __name__ == '__main__':
     ArcadeApp().run()
+
 
